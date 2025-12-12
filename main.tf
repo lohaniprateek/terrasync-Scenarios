@@ -27,38 +27,23 @@ provider "aws" {
   # }
 }
 
-# VPC Resource
-resource "aws_vpc" "main" {
-  cidr_block           = "10.0.0.0/16"
-  enable_dns_hostnames = true
-  enable_dns_support   = true
-
-  tags = {
-    Name        = "terrasync-test-vpc"
-    Environment = "development"
-    ManagedBy   = "terraform"
-  }
+# Use Default VPC (no VPC creation allowed)
+data "aws_vpc" "default" {
+  default = true
 }
 
-# Subnet Resource
-resource "aws_subnet" "public" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.1.0/24"
-  availability_zone       = "${var.aws_region}a"
-  map_public_ip_on_launch = true
-
-  tags = {
-    Name        = "terrasync-public-subnet"
-    Environment = "development"
-    Type        = "public"
-  }
+# Use Default Subnet (no subnet creation allowed)
+data "aws_subnet" "default" {
+  vpc_id            = data.aws_vpc.default.id
+  availability_zone = "${var.aws_region}a"
+  default_for_az    = true
 }
 
 # Security Group
 resource "aws_security_group" "web" {
   name        = "terrasync-web-sg"
   description = "Security group for web servers"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = data.aws_vpc.default.id
 
   ingress {
     description = "HTTP from anywhere"
@@ -94,7 +79,7 @@ resource "aws_security_group" "web" {
 resource "aws_instance" "web" {
   ami           = var.ami_id
   instance_type = var.instance_type
-  subnet_id     = aws_subnet.public.id
+  subnet_id     = data.aws_subnet.default.id
 
   vpc_security_group_ids = [aws_security_group.web.id]
 

@@ -3,16 +3,15 @@
 
 # Modified version of the web instance with different configuration
 resource "aws_instance" "web_modified" {
-  ami           = "ami-0c55b159cbfafe1f0"
-  instance_type = "t3.medium"  # Changed from t3.small
-  subnet_id     = aws_subnet.public.id
+  ami           = "ami-0f58b397bc5c1f2e8"  # Mumbai region AMI
+  instance_type = "t2.micro"  # Changed from t3.micro (simulating drift)
+  subnet_id     = data.aws_subnet.default.id
 
   vpc_security_group_ids = [aws_security_group.web.id]
 
   root_block_device {
     volume_size = 30  # Changed from 20
     volume_type = "gp3"
-    iops        = 3000  # Added IOPS configuration
   }
 
   monitoring = true  # Added monitoring

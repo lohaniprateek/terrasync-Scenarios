@@ -1,5 +1,6 @@
 # Multi-resource test scenario
-# Tests TerraSync with multiple resource types and relationships
+# Tests TerraSync with multiple EC2 and S3 resources
+# Restricted to EC2 (micro instances) and S3 services only in ap-south-1
 
 terraform {
   required_providers {
@@ -10,57 +11,42 @@ terraform {
   }
 }
 
-# Application Load Balancer
-resource "aws_lb" "app" {
-  name               = "terrasync-app-lb"
-  internal           = false
-  load_balancer_type = "application"
-  security_groups    = [aws_security_group.lb.id]
-  subnets            = [aws_subnet.public.id, aws_subnet.public_2.id]
-
-  enable_deletion_protection = false
-
-  tags = {
-    Name        = "terrasync-app-lb"
-    Environment = "development"
-  }
+# Data source for default VPC
+data "aws_vpc" "default" {
+  default = true
 }
 
-# Additional subnet for multi-AZ
-resource "aws_subnet" "public_2" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.2.0/24"
-  availability_zone       = "us-east-1b"
-  map_public_ip_on_launch = true
-
-  tags = {
-    Name        = "terrasync-public-subnet-2"
-    Environment = "development"
-    Type        = "public"
-  }
+# Data source for default subnet
+data "aws_subnet" "default" {
+  vpc_id            = data.aws_vpc.default.id
+  availability_zone = "ap-south-1a"
+  default_for_az    = true
 }
 
-# LB Security Group
-resource "aws_security_group" "lb" {
-  name        = "terrasync-lb-sg"
-  description = "Security group for load balancer"
-  vpc_id      = aws_vpc.main.id
+# Additional Security Group for App Servers
+resource "aws_security_group" "app" {
+  name        = "terrasync-app-sg"
+  description = "Security group for app servers"
+  vpc_id      = data.aws_vpc.default.id
 
   ingress {
-    from_port   = 80
-    to_port     = 80
+    description = "SSH access"
+    from_port   = 22
+    to_port     = 22
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
-    from_port   = 443
-    to_port     = 443
+    description = "Custom app port"
+    from_port   = 8080
+    to_port     = 8080
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
+    description = "All outbound traffic"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -68,96 +54,119 @@ resource "aws_security_group" "lb" {
   }
 
   tags = {
-    Name = "terrasync-lb-sg"
-  }
-}
-
-# Target Group
-resource "aws_lb_target_group" "app" {
-  name     = "terrasync-tg"
-  port     = 80
-  protocol = "HTTP"
-  vpc_id   = aws_vpc.main.id
-
-  health_check {
-    enabled             = true
-    healthy_threshold   = 2
-    interval            = 30
-    matcher             = "200"
-    path                = "/"
-    port                = "traffic-port"
-    protocol            = "HTTP"
-    timeout             = 5
-    unhealthy_threshold = 2
-  }
-
-  tags = {
-    Name = "terrasync-target-group"
-  }
-}
-
-# RDS Instance
-resource "aws_db_instance" "postgres" {
-  identifier     = "terrasync-db"
-  engine         = "postgres"
-  engine_version = "15.3"
-  instance_class = "db.t3.micro"
-
-  allocated_storage     = 20
-  max_allocated_storage = 100
-
-  db_name  = "terrasync"
-  username = "admin"
-  password = "changeme123!"  # In production, use secrets manager
-
-  vpc_security_group_ids = [aws_security_group.db.id]
-  db_subnet_group_name   = aws_db_subnet_group.main.name
-
-  skip_final_snapshot = true
-  publicly_accessible = false
-
-  backup_retention_period = 7
-  backup_window           = "03:00-04:00"
-  maintenance_window      = "mon:04:00-mon:05:00"
-
-  tags = {
-    Name        = "terrasync-postgres"
+    Name        = "terrasync-app-sg"
     Environment = "development"
   }
 }
 
-# DB Subnet Group
-resource "aws_db_subnet_group" "main" {
-  name       = "terrasync-db-subnet-group"
-  subnet_ids = [aws_subnet.public.id, aws_subnet.public_2.id]
+# Multiple EC2 Instances
+resource "aws_instance" "app_server_1" {
+  ami           = "ami-0f58b397bc5c1f2e8"  # Mumbai AMI
+  instance_type = "t3.micro"
+  subnet_id     = data.aws_subnet.default.id
+
+  vpc_security_group_ids = [aws_security_group.app.id]
+
+  root_block_device {
+    volume_size = 8
+    volume_type = "gp3"
+  }
 
   tags = {
-    Name = "terrasync-db-subnet-group"
+    Name        = "terrasync-app-server-1"
+    Environment = "development"
+    Role        = "application"
   }
 }
 
-# Database Security Group
-resource "aws_security_group" "db" {
-  name        = "terrasync-db-sg"
-  description = "Security group for RDS PostgreSQL"
-  vpc_id      = aws_vpc.main.id
+resource "aws_instance" "app_server_2" {
+  ami           = "ami-0f58b397bc5c1f2e8"  # Mumbai AMI
+  instance_type = "t2.micro"
+  subnet_id     = data.aws_subnet.default.id
 
-  ingress {
-    description     = "PostgreSQL from web servers"
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.web.id]
-  }
+  vpc_security_group_ids = [aws_security_group.app.id]
 
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+  root_block_device {
+    volume_size = 8
+    volume_type = "gp2"
   }
 
   tags = {
-    Name = "terrasync-db-sg"
+    Name        = "terrasync-app-server-2"
+    Environment = "development"
+    Role        = "application"
   }
+}
+
+# Multiple S3 Buckets
+resource "aws_s3_bucket" "logs" {
+  bucket = "terrasync-logs-bucket-12345"
+
+  tags = {
+    Name        = "terrasync-logs-bucket"
+    Environment = "development"
+    Purpose     = "application-logs"
+  }
+}
+
+resource "aws_s3_bucket" "backups" {
+  bucket = "terrasync-backups-bucket-12345"
+
+  tags = {
+    Name        = "terrasync-backups-bucket"
+    Environment = "development"
+    Purpose     = "backups"
+  }
+}
+
+# S3 Bucket Versioning for Logs
+resource "aws_s3_bucket_versioning" "logs" {
+  bucket = aws_s3_bucket.logs.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# S3 Bucket Versioning for Backups
+resource "aws_s3_bucket_versioning" "backups" {
+  bucket = aws_s3_bucket.backups.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# S3 Bucket Lifecycle for Logs
+resource "aws_s3_bucket_lifecycle_configuration" "logs" {
+  bucket = aws_s3_bucket.logs.id
+
+  rule {
+    id     = "delete-old-logs"
+    status = "Enabled"
+
+    expiration {
+      days = 30
+    }
+  }
+}
+
+# S3 Public Access Block for Logs
+resource "aws_s3_bucket_public_access_block" "logs" {
+  bucket = aws_s3_bucket.logs.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# S3 Public Access Block for Backups
+resource "aws_s3_bucket_public_access_block" "backups" {
+  bucket = aws_s3_bucket.backups.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
